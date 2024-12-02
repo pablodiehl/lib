@@ -10,13 +10,56 @@ import type {
   AzionDatabaseDeleteResponse,
   AzionDatabaseQueryResponse,
   AzionDatabaseResponse,
+  AzionEnvironment,
   AzionSQLClient,
   CreateAzionSQLClient,
 } from './types';
 
-const envDebugFlag = process.env.AZION_DEBUG && process.env.AZION_DEBUG === 'true';
-const resolveToken = (token?: string) => token ?? process.env.AZION_TOKEN ?? '';
+/**
+ * Determines if the code is running in a browser environment.
+ *
+ * @returns {boolean} True if running in a browser, false otherwise.
+ *
+ * @example
+ * if (isBrowserEnvironment()) {
+ *   console.log('Running in browser');
+ * } else {
+ *   console.log('Running in Node.js');
+ * }
+ */
+const isBrowserEnvironment = (): boolean => {
+  return typeof window !== 'undefined' && typeof window.document !== 'undefined';
+};
+
+const envDebugFlag = !isBrowserEnvironment() && process?.env.AZION_DEBUG === 'true';
+
+const resolveToken = (token?: string) => {
+  if (isBrowserEnvironment()) {
+    return token ?? '';
+  }
+  return token ?? process?.env.AZION_TOKEN ?? '';
+};
+
 const resolveDebug = (debug?: boolean) => debug ?? !!envDebugFlag;
+
+const resolveEnv = (env?: AzionEnvironment): AzionEnvironment => {
+  if (isBrowserEnvironment()) {
+    return env ?? 'production';
+  }
+  return env ?? (process?.env.AZION_ENV as AzionEnvironment) ?? 'production';
+};
+
+/**
+ * Resolves client options by applying default values for debug and environment settings
+ *
+ * @param {AzionClientOptions} [options] - Raw client options
+ * @returns {AzionClientOptions} Resolved options with defaults applied
+ */
+const resolveClientOptions = (options?: AzionClientOptions): AzionClientOptions => ({
+  ...options,
+  debug: resolveDebug(options?.debug),
+  env: resolveEnv(options?.env),
+});
 
 /**
  * Creates a new database.

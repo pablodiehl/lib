@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { AzionDatabaseCollectionOptions } from '../../types';
+import { AzionDatabaseCollectionOptions, AzionEnvironment } from '../../types';
 import { limitArraySize } from '../../utils';
 import fetchWithErrorHandling from '../../utils/fetch';
 import type {
@@ -9,10 +9,57 @@ import type {
   ApiQueryExecutionResponse,
 } from './types';
 
-const BASE_URL =
-  process.env.AZION_ENV === 'stage'
-    ? 'https://stage-api.azion.com/v4/edge_sql/databases'
-    : 'https://api.azion.com/v4/edge_sql/databases';
+/**
+ * Gets base URL based on environment
+ * @param {AzionEnvironment} env - The environment to use for the API call.
+ * @returns {string} The base URL for the specified environment.
+ */
+const getBaseUrl = (env: AzionEnvironment = 'production'): string => {
+  const urls: Record<AzionEnvironment, string> = {
+    production: 'https://api.azion.com/v4/storage/buckets',
+    development: '/v4/storage/buckets',
+    staging: 'https://stage-api.azion.com/v4/storage/buckets',
+  };
+  return urls[env];
+};
+
+/**
+ * Builds request headers based on token and additional headers
+ * @param token Optional authentication token
+ * @param additionalHeaders Additional request-specific headers
+ */
+const buildHeaders = (token?: string, additionalHeaders = {}) => {
+  const baseHeaders = {
+    Accept: 'application/json',
+    ...additionalHeaders,
+  };
+
+  if (token) {
+    return {
+      ...baseHeaders,
+      Authorization: `Token ${token}`,
+    };
+  }
+
+  return baseHeaders;
+};
+
+/**
+ * Builds fetch request options
+ */
+const buildFetchOptions = (method: string, headers: Record<string, string>, body?: string) => {
+  const options: RequestInit = {
+    method,
+    headers,
+    credentials: 'include',
+  };
+
+  if (body) {
+    options.body = body;
+  }
+
+  return options;
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handleApiError = (fields: string[], data: any, operation: string) => {
@@ -36,20 +83,18 @@ const handleApiError = (fields: string[], data: any, operation: string) => {
  * @param {boolean} [debug] - Optional debug flag.
  * @returns {ApiCreateDatabaseResponse} The response from the API.
  */
-const postEdgeDatabase = async (token: string, name: string, debug?: boolean): Promise<ApiCreateDatabaseResponse> => {
+const postEdgeDatabase = async (
+  token: string,
+  name: string,
+  debug?: boolean,
+  env: AzionEnvironment = 'production',
+): Promise<ApiCreateDatabaseResponse> => {
   try {
-    const result = await fetchWithErrorHandling(
-      BASE_URL,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Token ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name }),
-      },
-      debug,
-    );
+    const headers = buildHeaders(token, { 'Content-Type': 'application/json' });
+    const options = buildFetchOptions('POST', headers, JSON.stringify({ name }));
+
+    const result = await fetchWithErrorHandling(getBaseUrl(env), options, debug);
+
     if (!result.state) {
       result.error = handleApiError(['detail'], result, 'post database');
       return {
@@ -86,18 +131,18 @@ const postEdgeDatabase = async (token: string, name: string, debug?: boolean): P
  * @param {boolean} [debug] - Optional debug flag.
  * @returns {Promise<ApiDeleteDatabaseResponse>} The response from the API or error if an error occurs.
  */
-const deleteEdgeDatabase = async (token: string, id: number, debug?: boolean): Promise<ApiDeleteDatabaseResponse> => {
+const deleteEdgeDatabase = async (
+  token: string,
+  id: number,
+  debug?: boolean,
+  env: AzionEnvironment = 'production',
+): Promise<ApiDeleteDatabaseResponse> => {
   try {
-    const result = await fetchWithErrorHandling(
-      `${BASE_URL}/${id}`,
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Token ${token}`,
-        },
-      },
-      debug,
-    );
+    const headers = buildHeaders(token);
+    const options = buildFetchOptions('DELETE', headers);
+
+    const result = await fetchWithErrorHandling(`${getBaseUrl(env)}/${id}`, options, debug);
+
     if (!result.state) {
       result.error = handleApiError(['detail'], result, 'delete database');
       return {
@@ -106,9 +151,7 @@ const deleteEdgeDatabase = async (token: string, id: number, debug?: boolean): P
     }
     return {
       state: result.state,
-      data: {
-        id,
-      },
+      data: { id },
     };
   } catch (error: any) {
     if (debug) console.error('Error deleting EdgeDB:', error);
@@ -131,20 +174,14 @@ const postQueryEdgeDatabase = async (
   id: number,
   statements: string[],
   debug?: boolean,
+  env: AzionEnvironment = 'production',
 ): Promise<ApiQueryExecutionResponse> => {
   try {
-    const result = await fetchWithErrorHandling(
-      `${BASE_URL}/${id}/query`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Token ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ statements }),
-      },
-      debug,
-    );
+    const headers = buildHeaders(token, { 'Content-Type': 'application/json' });
+    const options = buildFetchOptions('POST', headers, JSON.stringify({ statements }));
+
+    const result = await fetchWithErrorHandling(`${getBaseUrl(env)}/${id}/query`, options, debug);
+
     if (!result.data || !Array.isArray(result.data)) {
       result.error = handleApiError(['detail'], result, 'post query');
       return {
@@ -195,10 +232,15 @@ const postQueryEdgeDatabase = async (
  * @param {boolean} [debug] - Optional debug flag.
  * @returns {Promise<ApiCreateDatabaseResponse>} The response from the API or error.
  */
-const getEdgeDatabaseById = async (token: string, id: number, debug?: boolean): Promise<ApiCreateDatabaseResponse> => {
+const getEdgeDatabaseById = async (
+  token: string,
+  id: number,
+  debug?: boolean,
+  env: AzionEnvironment = 'production',
+): Promise<ApiCreateDatabaseResponse> => {
   try {
     const result = await fetchWithErrorHandling(
-      `${BASE_URL}/${id}`,
+      `${getBaseUrl(env)}/${id}`,
       {
         method: 'GET',
         headers: {
@@ -234,9 +276,10 @@ const getEdgeDatabases = async (
   token: string,
   params?: Partial<AzionDatabaseCollectionOptions>,
   debug?: boolean,
+  env: AzionEnvironment = 'production',
 ): Promise<ApiListDatabasesResponse> => {
   try {
-    const url = new URL(BASE_URL);
+    const url = new URL(getBaseUrl(env));
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined) {
